@@ -1,5 +1,9 @@
 # Day 12 Lab Report — Tran Nguyen Anh Thu (2A202600915)
 
+**Họ và Tên**: Trần Nguyễn Anh Thư
+
+**MSSV**: 2A202600915
+
 ---
 
 ## Part 1: Localhost vs Production
@@ -9,20 +13,19 @@
 | # | Vấn đề | Dòng | Hậu quả |
 |---|--------|------|---------|
 | 1 | API key ghi thẳng vào code | 17 | Đẩy lên GitHub là lộ key ngay |
-| 2 | Database URL có password ghi thẳng vào code | 18 | Ai clone repo là có luôn password DB |
+| 2 | Không có config management | 18 | Ai clone repo là có luôn password DB |
 | 3 | `print()` in ra cả API key trong log | 34 | Ai xem log là thấy secret |
-| 4 | Không có endpoint `/health` | — | Cloud không biết app đang crash để khởi động lại |
-| 5 | `host="localhost"` cứng trong code | 51 | Không chạy được trong container hoặc trên cloud |
-| 6 | `reload=True` cứng trong code | 53 | Tốn tài nguyên, không ổn định khi chạy thật |
+| 4 | Không có endpoint `/health` check endpoint| — | Cloud không biết app đang crash để khởi động lại |
+| 5 | Port cố định — không đọc từ environment | 51 | Chỉ chạy được local, hông chạy được trong container hoặc trên cloud |
 
 ### Exercise 1.2 — Chạy thử develop version
 
 **Lệnh chạy:**
+**Lệnh test:**
 ```bash
-cd 01-localhost-vs-production/develop
-python app.py
-curl -X POST "http://localhost:8000/ask?question=Hello"
+curl "http://localhost:8000/ask?question=Hello" -X POST
 ```
+
 
 **Kết quả API trả về:**
 ```json
@@ -80,27 +83,47 @@ App chạy được, nhưng không nên đưa lên cloud vì lý do trên.
 
 | Image | Base | Kích thước ước tính |
 |-------|------|---------------------|
-| `my-agent:develop` | `python:3.11` (full) | 1.3 GB |
-| `my-agent:production` | `python:3.11-slim` (multi-stage) | 24.4 MB |
-| Tiết kiệm | — | ~70% |
+| `my-agent:develop` | 413 MB | 1.67GB  |
+| `my-agent:production` | 56.7MB | 262 MB |
 
 ### Exercise 2.3 — Tại sao multi-stage build nhỏ hơn?
 
-Multi-stage build giống như đặt đồ ăn delivery: bếp (Stage 1) cần dao, thớt, nồi để nấu — nhưng khi mang đến tay khách (Stage 2) chỉ cần hộp đựng thức ăn, không cần mang cả bếp theo. Stage 1 cài `gcc`, `pip`, build tools để compile thư viện; Stage 2 chỉ copy kết quả đã compile, không copy công cụ → image nhỏ hơn và an toàn hơn (ít phần mềm hơn = ít lỗ hổng hơn).
+Nhỏ hơn ~7.3 lần. Multi-stage build tách thành 2 stage:
+- Stage 1 (Builder): cài gcc, build tools để compile thư viện
+- Stage 2 (Runtime): chỉ copy kết quả đã compile, bỏ lại toàn bộ build tools
+- Base image `python:3.11-slim` thay vì `python:3.11` full → bỏ bớt OS packages không cần thiết
+- Kết quả: image chỉ chứa đúng những gì cần để *chạy*, không có thứ gì dùng để *build*nhỏ hơn và an toàn hơn (ít phần mềm hơn = ít lỗ hổng hơn).
 
-### Exercise 2.4 — Docker Compose architecture
+### Exercise 2.4 — Docker Compose 
+- `agent` — FastAPI AI agent (build từ Dockerfile multi-stage)
+- `redis` — Cache cho session và rate limiting  
+- `qdrant` — Vector database cho RAG
+- `nginx` — Reverse proxy, load balancer (port 80)
 
 ```
-Client (trình duyệt/curl)
-        │
-        ▼ port 80
-   [ Nginx ]  ← load balancer
-        │
-        ▼ port 8000 (internal)
-   [ Agent ]  ← Python app
+Client (curl/browser)
+│ port 80
+▼
+[ Nginx ]  ← reverse proxy
+│ port 8000 (internal network)
+▼
+[ Agent ]  ← FastAPI app
+│
+├── [ Redis ]   ← cache, rate limit
+└── [ Qdrant ]  ← vector DB
 ```
 
-Services: `nginx` nhận traffic từ ngoài, chuyển vào `agent`. Khi scale thêm agent instances, Nginx tự phân tán request cho đều.
+**Test thực chạy:**
+```bash
+curl http://localhost/health
+# → {"status":"ok","uptime_seconds":134.3,"version":"2.0.0",...}
+
+curl http://localhost/ask -X POST -H "Content-Type: application/json" \
+  -d '{"question": "Explain microservices"}'
+# → {"answer":"Tôi là AI agent được deploy lên cloud..."}
+```
+
+**Các service communicate thế nào?** Tất cả trong cùng internal Docker network — agent gọi Redis qua `redis://redis:6379`, gọi Qdrant qua `http://qdrant:6333`. Nginx nhận traffic từ ngoài, forward vào agent. Client không bao giờ gọi thẳng vào agent hay Redis.
 
 ---
 
@@ -110,26 +133,36 @@ Services: `nginx` nhận traffic từ ngoài, chuyển vào `agent`. Khi scale t
 
 ### Exercise 3.1 — Deploy Railway
 
+**URL:** https://lab2-deploy-production.up.railway.app
+
+**Test thực chạy:**
 ```bash
-cd 03-cloud-deployment/railway
-npm i -g @railway/cli
-railway login
-railway init
-railway variables set PORT=8000
-railway variables set AGENT_API_KEY=my-secret-key
-railway up
-railway domain
+curl https://lab2-deploy-production.up.railway.app/health
+# → {"status":"ok","uptime_seconds":298.9,"platform":"Railway","timestamp":"..."}
+
+curl https://lab2-deploy-production.up.railway.app/ask -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Am I on the cloud?"}'
+# → {"question":"Am I on the cloud?","answer":"Đây là câu trả lời từ AI agent (mock)...","platform":"Railway"}
 ```
+
+**Screenshot:** [screenshots/running.png]
 
 
 ### Exercise 3.2 — So sánh railway.toml vs render.yaml
 
 | | railway.toml | render.yaml |
 |---|---|---|
-| Nền tảng | Railway | Render |
-| Cách deploy | CLI (`railway up`) hoặc connect GitHub | Chỉ qua GitHub |
-| Health check | Tự phát hiện | Khai báo trong file |
-| Free tier | $5 credit | 750 giờ/tháng |
+| **Format** | TOML | YAML |
+| **Deploy** | CLI (`railway up`) hoặc GitHub | Chỉ qua GitHub (Blueprint) |
+| **Build** | Nixpacks (auto-detect) | Khai báo `buildCommand` rõ ràng |
+| **Health check** | `healthcheckPath = "/health"` | `healthCheckPath: /health` |
+| **Secrets** | Set qua CLI hoặc Dashboard | `sync: false` = set thủ công trên Dashboard, hoặc `generateValue: true` để Render tự sinh |
+| **Redis** | Add-on riêng trên Dashboard | Khai báo thẳng trong file (`type: redis`) |
+| **Region** | Chọn trên Dashboard | Khai báo trong file (`region: singapore`) |
+| **Auto deploy** | Mặc định khi connect GitHub | `autoDeploy: true` |
+
+**Điểm khác biệt chính:** `render.yaml` là Infrastructure as Code hoàn chỉnh hơn — khai báo cả Redis, region, secrets policy ngay trong file. `railway.toml` tối giản hơn, nhiều thứ config qua Dashboard.
 
 ---
 
@@ -137,85 +170,55 @@ railway domain
 
 ### Exercise 4.1 — API Key authentication
 
-**Test thực tế:**
-
+**Test thực chạy:**
 ```bash
-# Test 1: Không có key
-curl -X POST http://localhost:8000/ask -d '{"question":"Hello"}'
-# → 401: "Missing API key. Include header: X-API-Key: <your-key>"
+# Test 1: Không có key → 401
+curl http://localhost:8000/ask -X POST -d '{"question":"Hello"}'
+# → {"detail":"Missing API key. Include header: X-API-Key: "}
 
-# Test 2: Sai key  
-curl -H "X-API-Key: wrong" -X POST http://localhost:8000/ask ...
-# → 403: "Invalid API key."
+# Test 2: Sai key → 401
+curl http://localhost:8000/ask -X POST -H "X-API-Key: wrong-key" -d '{"question":"Hello"}'
+# → {"detail":"Invalid API key."}
 
-# Test 3: Đúng key
-curl -H "X-API-Key: secret-key-123" -X POST http://localhost:8000/ask ...
-# → 200: {"question":"Hello","answer":"..."}
+# Test 3: Đúng key → 200
+curl http://localhost:8000/ask -X POST -H "X-API-Key: secret-key-123" -d '{"question":"Hello"}'
+# → {"question":"Hello","answer":"Agent đang hoạt động tốt!..."}
 ```
 
-**Kết quả thực chạy:**
-```
-Test 1 → Status: 401  ✅
-Test 2 → Status: 403  ✅
-Test 3 → Status: 200  ✅
-```
+**API key check ở đâu?** Hàm `verify_api_key()` — FastAPI dependency, tự gọi trước mọi endpoint được bảo vệ.
 
-**API key được check ở đâu?** Hàm `verify_api_key()` trong `app.py` — đây là một "dependency" mà FastAPI tự gọi trước khi chạy bất kỳ endpoint nào được bảo vệ.
+**Sai key → gì xảy ra?** Trả về 401 ngay, không chạy đến phần gọi AI.
 
-**Điều gì xảy ra nếu sai key?** App trả về HTTP 403 ngay lập tức, không bao giờ chạy đến phần gọi AI.
-
-**Làm sao rotate key?** Chỉ cần thay giá trị biến môi trường `AGENT_API_KEY` và khởi động lại app — không cần sửa code.
+**Rotate key?** Thay `AGENT_API_KEY` trong env var, restart app — không cần sửa code.
 
 ### Exercise 4.2 — JWT authentication
 
 **Lấy token:**
 ```bash
-curl -X POST http://localhost:8000/auth/token \
+curl http://localhost:8000/auth/token -X POST \
+  -H "Content-Type: application/json" \
   -d '{"username": "student", "password": "demo123"}'
-```
-
-**Kết quả thực chạy:**
-```json
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "token_type": "bearer",
-  "expires_in_minutes": 60
-}
+# → {"access_token":"eyJhbGci...","token_type":"bearer","expires_in_minutes":60}
 ```
 
 **Dùng token gọi API:**
 ```bash
-curl -H "Authorization: Bearer <token>" \
-  -X POST http://localhost:8000/ask \
+curl http://localhost:8000/ask -X POST \
+  -H "Authorization: Bearer " \
   -d '{"question": "Explain JWT"}'
-# → 200: {"question":"Explain JWT","answer":"...","usage":{...}}
+# → {"answer":"...","usage":{"requests_remaining":9,"budget_remaining_usd":2.1e-05}}
 ```
+
 
 ### Exercise 4.3 — Rate limiting
 
-**Algorithm:** Sliding Window — đếm số request trong 60 giây gần nhất, nếu vượt quá giới hạn thì chặn.
+**Algorithm:** Sliding window — 10 req/phút cho user thường, 100 req/phút cho admin.
 
 **Test thực chạy 12 lần liên tiếp:**
 ```
 Kết quả: [200, 200, 200, 200, 200, 200, 200, 200, 200, 429, 429, 429]
 → 9 lần thành công, 3 lần bị chặn
 ```
-
-**Limit:** User thường = 10 req/phút, Admin = 100 req/phút
-
-**Response khi bị chặn (429):**
-```json
-{
-  "detail": {
-    "error": "Rate limit exceeded",
-    "limit": 10,
-    "window_seconds": 60,
-    "retry_after_seconds": 59
-  }
-}
-```
-
-**Làm sao bypass limit cho admin?** Dùng tài khoản có `role = "admin"` — app dùng instance `rate_limiter_admin` riêng với giới hạn cao hơn.
 
 ### Exercise 4.4 — Cost guard
 
@@ -244,146 +247,136 @@ Cách hoạt động: Mỗi lần user gửi câu hỏi, app ước tính chi ph
 ### Exercise 5.1 — Health checks thực chạy
 
 ```bash
-cd 05-scaling-reliability/develop
-python app.py
+curl http://localhost:8000/health
+# → {"status":"ok","uptime_seconds":85.6,"version":"1.0.0","environment":"development",
+#    "timestamp":"2026-06-12T09:40:33.022089+00:00",
+#    "checks":{"memory":{"status":"ok","used_percent":75.9}}}
+
+curl http://localhost:8000/ready
+# → {"ready":true,"in_flight_requests":1}
 ```
 
-**`/health` response:**
-```json
-{
-  "status": "ok",
-  "uptime_seconds": 2.7,
-  "version": "1.0.0",
-  "environment": "development",
-  "timestamp": "2026-06-12T05:09:59.643285+00:00",
-  "checks": {
-    "memory": {"status": "ok", "used_percent": 82.4}
-  }
-}
-```
+**/health vs /ready khác nhau:**
+- `/health` = "app còn sống không?" → cloud dùng để quyết định có restart container không
+- `/ready` = "app sẵn sàng nhận request chưa?" → load balancer dùng để quyết định có route traffic vào không. Trả về 503 khi đang khởi động hoặc đang tắt
 
-**`/ready` response:**
-```json
-{"ready": true, "in_flight_requests": 1}
-```
-
-Hai endpoint này khác nhau:
-- `/health` = "app còn sống không?" — cloud dùng để quyết định có restart không
-- `/ready` = "app sẵn sàng nhận request chưa?" — load balancer dùng để quyết định có gửi traffic vào không. Trả về 503 khi app đang khởi động hoặc đang tắt.
 
 ### Exercise 5.2 — Graceful shutdown
 
-**Log thực tế khi tắt app:**
+App xử lý SIGTERM (signal cloud gửi khi muốn tắt container):
+```python
+signal.signal(signal.SIGTERM, handle_sigterm)
 ```
-INFO  Agent is ready!
-...
-INFO  Graceful shutdown initiated...
-INFO  Shutdown complete
-INFO  Received signal 15 — uvicorn will handle graceful shutdown
-```
-
-App nhận SIGTERM (signal 15 từ cloud/Docker), hoàn thành request đang xử lý, rồi mới tắt. Nếu không có graceful shutdown, người dùng đang nhờ AI trả lời sẽ nhận được lỗi giữa chừng.
+Khi nhận SIGTERM → hoàn thành request đang xử lý → mới tắt. Nếu không có graceful shutdown, user đang chờ response sẽ nhận lỗi giữa chừng.
 
 ### Exercise 5.3 — Tại sao stateless quan trọng?
 
-**Vấn đề khi lưu state trong memory:**
+**Anti-pattern (state trong memory):**
 ```python
-# Code sai — dữ liệu nằm trong RAM của 1 máy
-conversation_history = {}
-
-# User A gửi request 1 → vào Instance 1 → lưu history vào memory Instance 1
-# User A gửi request 2 → vào Instance 2 → KHÔNG có history → trả lời như lần đầu
+conversation_history = {}  # ❌ chỉ tồn tại trong RAM của 1 instance
 ```
 
-**Giải pháp — lưu state trong Redis:**
+**Production (state trong Redis):**
 ```python
-# Bất kỳ instance nào cũng đọc được từ Redis
-history = redis.lrange(f"history:{user_id}", 0, -1)
+history = redis.lrange(f"history:{session_id}", 0, -1)  # ✅ shared across all instances
 ```
 
-Khi có 3 instances, chúng share cùng 1 Redis nên dù request vào instance nào cũng có đủ thông tin. Khi 1 instance crash, 2 cái còn lại tiếp tục hoạt động bình thường, không mất dữ liệu.
+**Bằng chứng thực tế:** Test 5.4 — 10 requests với cùng `session_id="test-session"` được phục vụ bởi 3 instances khác nhau nhưng `turn` vẫn tăng liên tục → state được share qua Redis, không mất khi đổi instance.
 
 ### Exercise 5.4 — Load balancing
 
+**Chạy 3 instances:**
 ```bash
 docker compose up --scale agent=3
 ```
 
-3 container agent chạy song song, Nginx phân tán request theo round-robin. Khi 1 container chết, Nginx tự chuyển traffic sang 2 cái còn lại. Không downtime.
+**Test 10 requests — kết quả served_by:**
+- Request 1:  instance-5ac1ed
+- Request 2:  instance-76c6b0
+- Request 3:  instance-ae0fb7
+- Request 4:  instance-5ac1ed
+- Request 5:  instance-76c6b0
+- Request 6:  instance-ae0fb7
+- Request 7:  instance-5ac1ed
+- Request 8:  instance-76c6b0
+- Request 9:  instance-ae0fb7
+- Request 10: instance-5ac1ed
+
+**Nhận xét:** Nginx phân tán request theo round-robin — 3 instances luân phiên đều đặn. Dù cùng `session_id`, conversation history vẫn đúng vì state lưu trong Redis dùng chung, không phải trong memory của từng instance.
 
 ### Exercise 5.5 — Stateless design (production app)
 
-Production app (`05-scaling-reliability/production/app.py`) có fallback thông minh:
-
-```
-✅ Connected to Redis     ← chạy đúng
-⚠️  Redis not available — using in-memory store (not scalable!)  ← khi không có Redis
-```
-
-Khi không có Redis (ví dụ chạy local), app tự dùng in-memory dict — vẫn chạy được nhưng cảnh báo rõ là không scale được.
-
----
-
-## Part 6: Final Project — Production Readiness Check
-
 ```bash
-cd 06-lab-complete
-python check_production_ready.py
+python test_stateless.py
 ```
 
 **Kết quả:**
+Session ID: 7ccb3d20-891a-436a-855f-906da38a7378
+- Request 1: [instance-8888b7] → Q: What is Docker?
+- Request 2: [instance-0b294e] → Q: Why do we need containers?
+- Request 3: [instance-f47a26] → Q: What is Kubernetes?
+- Request 4: [instance-8888b7] → Q: How does load balancing work?
+- Request 5: [instance-0b294e] → Q: What is Redis used for?
+
+Instances used: 3 khác nhau
+- ✅ All requests served despite different instances!
+- ✅ Session history preserved across all instances via Redis!
+
+**Kết luận:** 5 requests cùng session được phục vụ bởi 3 instances khác nhau nhưng conversation history đầy đủ 10 messages (5 user + 5 assistant). State không nằm trong memory của instance nào — tất cả lưu trong Redis dùng chung. Đây là stateless design đúng nghĩa.
+---
+
+## Part 6: Final Project — Containerize Day 08 RAG Chatbot
+
+**Repo được đóng gói:** [2A202600915-TranNguyenAnhThu-Day08](https://github.com/tn-anhthu/2A202600915-TranNguyenAnhThu-Day08)
+
+**App:** RAG Chatbot — Pháp luật Ma tuý Việt Nam (Streamlit UI + Fireworks AI generation)
+
+### Deployment Files
+
+| File | Mô tả |
+|------|-------|
+| `Dockerfile` | Multi-stage build (builder + python:3.11-slim runtime), non-root user |
+| `docker-compose.yml` | Local dev setup với HuggingFace cache volume |
+| `.dockerignore` | Loại trừ data/, .env, __pycache__ |
+| `.env.example` | Template không có secrets |
+| `railway.toml` | Railway deploy config dùng Dockerfile |
+| `DEPLOYMENT.md` | Hướng dẫn deploy và test commands |
+
+### Docker Image
 
 ```
-=======================================================
-  Production Readiness Check — Day 12 Lab
-=======================================================
-
-📁 Required Files
-  ✅ Dockerfile exists
-  ✅ docker-compose.yml exists
-  ✅ .dockerignore exists
-  ✅ .env.example exists
-  ✅ requirements.txt exists
-  ✅ railway.toml or render.yaml exists
-
-🔒 Security
-  ✅ .env in .gitignore
-  ✅ No hardcoded secrets in code
-
-🌐 API Endpoints (code check)
-  ✅ /health endpoint defined
-  ✅ /ready endpoint defined
-  ✅ Authentication implemented
-  ✅ Rate limiting implemented
-  ✅ Graceful shutdown (SIGTERM)
-  ✅ Structured logging (JSON)
-
-🐳 Docker
-  ✅ Multi-stage build
-  ✅ Non-root user
-  ✅ HEALTHCHECK instruction
-  ✅ Slim base image
-  ✅ .dockerignore covers .env
-  ✅ .dockerignore covers __pycache__
-
-=======================================================
-  Result: 20/20 checks passed (100%)
-  🎉 PRODUCTION READY! Deploy nào!
-=======================================================
+Image size: 491MB (content) / 2.35GB (disk with layers)
+Base: python:3.11-slim (multi-stage)
+Non-root user: appuser
+PYTHONPATH=/app (fix import src.*)
+CPU-only PyTorch (giảm ~1GB so với full CUDA)
 ```
 
-**Tóm tắt những gì `06-lab-complete` đã có:**
+### Public URL
+
+https://day8-deploy-production.up.railway.app
+
+### Health Check
+
+```bash
+curl https://day8-deploy-production.up.railway.app/_stcore/health
+```
+
+```
+ok
+```
+
+### Production Checklist
 
 | Tính năng | Có không | Ghi chú |
 |-----------|----------|---------|
-| Config từ env vars | ✅ | `app/config.py` dùng `os.getenv` |
-| API key auth | ✅ | Header `X-API-Key` bắt buộc |
-| Rate limiting | ✅ | 20 req/phút mặc định, đổi được qua env |
-| Cost guard | ✅ | Giới hạn $5/ngày mặc định |
-| `/health` endpoint | ✅ | Trả về uptime, version, request count |
-| `/ready` endpoint | ✅ | Trả về 503 khi chưa sẵn sàng |
-| Graceful shutdown | ✅ | Xử lý SIGTERM |
-| JSON logging | ✅ | Mỗi request log ra dưới dạng JSON |
-| Multi-stage Dockerfile | ✅ | `python:3.11-slim`, non-root user |
-| Không có hardcoded secrets | ✅ | Không có `sk-`, `password123` trong code |
-| `.env` không vào git | ✅ | Đã có trong `.gitignore` |
+| Multi-stage Dockerfile | ✅ | builder + runtime stage |
+| Non-root user | ✅ | `appuser` |
+| HEALTHCHECK instruction | ✅ | `/_stcore/health` |
+| Slim base image | ✅ | `python:3.11-slim` |
+| .env không vào git | ✅ | `.gitignore` có `.env.local` |
+| .dockerignore | ✅ | Loại trừ data/, .env, __pycache__ |
+| .env.example | ✅ | FIREWORKS_API_KEY, WEAVIATE_URL, etc. |
+| railway.toml | ✅ | builder = DOCKERFILE |
+| Deploy thành công | ✅ | Railway — Active |
+| Public URL | ✅ | day8-deploy-production.up.railway.app |
