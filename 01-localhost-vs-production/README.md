@@ -1,5 +1,9 @@
 # Section 1 — Từ Localhost Đến Production
 
+**Mã học viên** : 2A202600915
+
+**Họ và tên**: Trần Nguyễn Anh Thư
+
 ## Mục tiêu học
 - Hiểu tại sao "it works on my machine" là vấn đề
 - Nhận ra sự khác biệt giữa dev và production environment
@@ -67,5 +71,15 @@ python app.py
 ## Câu hỏi thảo luận
 
 1. Điều gì xảy ra nếu bạn push code với API key hardcode lên GitHub public?
+Key bị lộ ngay, bị hacker/người lạ lợi dụng để làm các illegal activities, đào coin,.... gây thiệt hại nặng nề đến tài chính, uy tín. 
+
 2. Tại sao stateless quan trọng khi scale?
+Nếu state nằm trong memory của instance, phải đảm bảo cùng một user luôn vào cùng một instance ("sticky sessions") — điều này làm load balancing kém hiệu quả và khiến khi instance đó crash, user mất toàn bộ dữ liệu.
+
+Stateless cho phép:
+- Scale ngang tự do — thêm/bớt instance bất kỳ lúc nào
+- Rolling deploy — tắt instance cũ, bật instance mới, không downtime
+- Crash recovery — instance chết không mất state vì state ở Redis
+
 3. 12-factor nói "dev/prod parity" — nghĩa là gì trong thực tế?
+Dev và prod nên sử dụng cùng một tool, cùng một ngôn ngữ, cùng một version, cùng một thư viện, cùng một môi trường,....
