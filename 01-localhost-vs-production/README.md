@@ -83,3 +83,18 @@ Stateless cho phép:
 
 3. 12-factor nói "dev/prod parity" — nghĩa là gì trong thực tế?
 Dev và prod nên sử dụng cùng một tool, cùng một ngôn ngữ, cùng một version, cùng một thư viện, cùng một môi trường,....
+
+
+---
+
+## 5 anti-patterns
+
+| Vấn đề | Dòng code | Tác hại |
+|--|--|--|
+| OPENAI_API_KEY hardcode | dòng 17 | Push GitHub → key bị lộ ngay |
+| DATABASE_URL hardcode | dòng 18 | Credentials trong git history |
+| print() log ra secret | dòng 34 | Using key: sk-hardcoded... hiện ra log |
+| Không có /health endpoint | — | Platform không biết khi nào restart |
+| host="localhost" + port=8000 cứng | dòng 51-52 | Không chạy được trong container/cloud |
+| reload=True trong production | dòng 53 | Ngốn CPU, không ổn định |
+

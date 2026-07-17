@@ -20,15 +20,23 @@ Create a file `MISSION_ANSWERS.md` with your answers to all exercises:
 ## Part 1: Localhost vs Production
 
 ### Exercise 1.1: Anti-patterns found
-1. [Your answer]
-2. [Your answer]
-...
+| Vấn đề | Dòng code | Tác hại |
+|--|--|--|
+| OPENAI_API_KEY hardcode | dòng 17 | Push GitHub → key bị lộ ngay |
+| DATABASE_URL hardcode | dòng 18 | Credentials trong git history |
+| print() log ra secret | dòng 34 | Using key: sk-hardcoded... hiện ra log |
+| Không có /health endpoint | — | Platform không biết khi nào restart |
+| host="localhost" + port=8000 cứng | dòng 51-52 | Không chạy được trong container/cloud |
+| reload=True trong production | dòng 53 | Ngốn CPU, không ổn định |
+
 
 ### Exercise 1.3: Comparison table
-| Feature | Develop | Production | Why Important? |
-|---------|---------|------------|----------------|
-| Config  | ...     | ...        | ...            |
-...
+| Feature | Basic | Advanced | Tại sao quan trọng? |
+|---------|-------|----------|---------------------|
+| Config | Hardcode | Env vars | Thay đổi được không cần sửa code |
+| Health check |  Không có |  /health + /ready | Cloud platform cần để biết khi nào restart |
+| Logging | print() | JSON | Dễ parse, không lộ key |
+| Shutdown | Đột ngột | Graceful | Request đang xử lý không bị cắt đứt giữa chừng |
 
 ## Part 2: Docker
 

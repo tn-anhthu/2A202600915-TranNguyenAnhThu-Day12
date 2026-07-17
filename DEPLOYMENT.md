@@ -1,5 +1,9 @@
 # Deployment Information
 
+**Họ và Tên**: Trần Nguyễn Anh Thư
+
+**MSSV**: 2A202600915
+
 ## Public URL
 https://day8-deploy-production.up.railway.app
 
